@@ -10,6 +10,7 @@ import TransactionTable from '../components/TransactionTable'
 import { useAuth } from '../context/AuthContext'
 
 const numberFormatter = new Intl.NumberFormat()
+const isMockMode = import.meta.env.VITE_USE_MOCK === 'true'
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -20,6 +21,7 @@ export default function DashboardPage() {
   const [error, setError] = useState('')
   const [transactionError, setTransactionError] = useState('')
   const [actionError, setActionError] = useState('')
+  const [actionNotice, setActionNotice] = useState('')
   const [period, setPeriod] = useState('24h')
   const [activeAction, setActiveAction] = useState('')
 
@@ -91,6 +93,7 @@ export default function DashboardPage() {
 
   async function startCheckout() {
     setActionError('')
+    setActionNotice('')
     setActiveAction('checkout')
 
     try {
@@ -99,6 +102,12 @@ export default function DashboardPage() {
         currency: 'usd',
         mode: 'normal',
       })
+
+      if (isMockMode) {
+        setActionNotice('Demo checkout complete. No payment was processed.')
+        setActiveAction('')
+        return
+      }
 
       if (typeof data.url !== 'string' || !data.url) {
         throw new Error('The checkout service did not return a redirect URL.')
@@ -157,7 +166,13 @@ export default function DashboardPage() {
             onClick={startCheckout}
             type="button"
           >
-            {activeAction === 'checkout' ? 'Starting checkout...' : 'Pay with Stripe (test)'}
+            {activeAction === 'checkout'
+              ? isMockMode
+                ? 'Preparing demo checkout...'
+                : 'Starting checkout...'
+              : isMockMode
+                ? 'Try demo checkout'
+                : 'Pay with Stripe (test)'}
           </button>
         </div>
       </section>
@@ -169,6 +184,16 @@ export default function DashboardPage() {
           role="alert"
         >
           {actionError}
+        </p>
+      )}
+
+      {actionNotice && (
+        <p
+          aria-live="polite"
+          className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+          role="status"
+        >
+          {actionNotice}
         </p>
       )}
 
@@ -216,9 +241,15 @@ export default function DashboardPage() {
           items={Array.isArray(transactions) ? transactions : []}
           onRetry={refreshTransactions}
         />
-        <p className="px-1 text-xs text-slate-500">
-          Stripe test card: <span className="font-semibold text-slate-700">4242 4242 4242 4242</span>
-        </p>
+        {isMockMode ? (
+          <p className="px-1 text-xs text-slate-500">
+            Demo checkout only. No payment is processed.
+          </p>
+        ) : (
+          <p className="px-1 text-xs text-slate-500">
+            Stripe test card: <span className="font-semibold text-slate-700">4242 4242 4242 4242</span>
+          </p>
+        )}
       </section>
     </div>
   )
