@@ -11,6 +11,7 @@ This document defines the request and response shapes used by the Fraud Detectio
 - Protected endpoints require `Authorization: Bearer <token>`. The token is returned by registration or login.
 - Errors use this shape: `{ "error": { "message": "...", "code": "..." } }`.
 - `401` means unauthenticated, `422` means invalid input, and `429` means rate limited.
+- The Python API rate-limits general API traffic to 600 requests per 15 minutes per client address; login/registration and simulation each allow 10 requests per 15 minutes.
 - Responses use `id`, not `_id`, and never include the 30 model input features.
 
 ## Transaction
@@ -20,8 +21,8 @@ This document defines the request and response shapes used by the Fraud Detectio
 | `id` | string |
 | `createdAt` | ISO date-time string |
 | `displayAmount` | number in major currency units, such as `49.99` |
-| `currency` | string, such as `usd` |
-| `source` | `stripe` or `simulated` |
+| `currency` | lowercase currency code, such as `inr` or `usd` |
+| `source` | `razorpay`, `simulated`, or `stripe` for historical records |
 | `fraudProbability` | number from `0` to `1`, or `null` when unscored |
 | `riskLabel` | `LOW`, `MEDIUM`, `HIGH`, or `UNSCORED` |
 | `isFlagged` | boolean |
@@ -29,6 +30,7 @@ This document defines the request and response shapes used by the Fraud Detectio
 | `modelVersion` | string, such as `xgb-v1` |
 | `reviewDecision` | `null`, `confirmed_fraud`, or `legit` |
 | `stripePaymentIntentId` | string or `null` |
+| `razorpayPaymentId` | string or `null` |
 
 ## Endpoints
 
@@ -102,6 +104,40 @@ Response:
 
 ### Transactions
 
+#### `POST /api/predictions/batch` - token required
+
+Scores 1–100 transactions without saving them. Each item must contain exactly `Time`, `V1` through `V28`, and `Amount`, matching the ML model input; all values must be finite and `Amount` must be non-negative. The optional dataset label `Class` must not be sent.
+
+Request:
+
+```json
+{
+  "transactions": [
+    { "Time": 0, "V1": 0, "V2": 0, "V3": 0, "V4": 0, "V5": 0, "V6": 0, "V7": 0, "V8": 0, "V9": 0, "V10": 0, "V11": 0, "V12": 0, "V13": 0, "V14": 0, "V15": 0, "V16": 0, "V17": 0, "V18": 0, "V19": 0, "V20": 0, "V21": 0, "V22": 0, "V23": 0, "V24": 0, "V25": 0, "V26": 0, "V27": 0, "V28": 0, "Amount": 49.99 }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "count": 1,
+  "items": [
+    {
+      "index": 0,
+      "fraudProbability": 0.12,
+      "riskLabel": "HIGH",
+      "isFlagged": true,
+      "threshold": 0.0795,
+      "modelVersion": "xgboost-v1"
+    }
+  ]
+}
+```
+
+`index` is zero-based in the submitted list. The result contains no input features, and predictions are not persisted.
+
 #### `GET /api/transactions` - token required
 
 Query parameters:
@@ -122,14 +158,15 @@ Results are newest first.
       "createdAt": "2026-10-25T12:30:00.000Z",
       "displayAmount": 49.99,
       "currency": "usd",
-      "source": "stripe",
+      "source": "razorpay",
       "fraudProbability": 0.12,
       "riskLabel": "LOW",
       "isFlagged": false,
       "scoringStatus": "scored",
       "modelVersion": "xgb-v1",
       "reviewDecision": null,
-      "stripePaymentIntentId": "pi_example"
+      "stripePaymentIntentId": null,
+      "razorpayPaymentId": "pay_example"
     }
   ],
   "page": 1,
@@ -204,7 +241,8 @@ Response:
       "scoringStatus": "scored",
       "modelVersion": "xgb-v1",
       "reviewDecision": null,
-      "stripePaymentIntentId": null
+      "stripePaymentIntentId": null,
+      "razorpayPaymentId": null
     }
   ]
 }
@@ -222,17 +260,69 @@ Request `decision` is `confirmed_fraud` or `legit`.
 
 Response is the updated `Transaction` object.
 
+#### `GET /api/transactions/:id/explanation` - token required
+
+Returns the top five feature impacts for a scored transaction owned by the authenticated merchant. The response does not expose the transaction's full model input. XGBoost uses TreeSHAP; logistic regression uses exact coefficient contributions. `impact` is in log-odds: positive increases the model's fraud score and negative lowers it. A transaction without a completed model score returns `409`.
+
+```json
+{
+  "transactionId": "transaction-id",
+  "fraudProbability": 0.91,
+  "threshold": 0.0795,
+  "modelVersion": "xgboost-v1",
+  "method": "tree_shap",
+  "baselineLogOdds": -4.2,
+  "topFactors": [
+    {
+      "feature": "V14",
+      "value": -2.5,
+      "impact": 3.1,
+      "direction": "increases_risk"
+    }
+  ]
+}
+```
+
+Each `topFactors` item has `feature` (string), `value` (number), `impact` (number), and `direction` (`increases_risk` or `decreases_risk`). These are model explanations, not proof that a transaction is fraudulent.
+
 ### Payments
 
 #### `POST /api/payments/checkout-session` - token required
 
-Request `amount` is at least `1`, `currency` is `usd`, and `mode` is `normal` or `fraud-demo`.
+Request `amount` is at least `1`, `currency` is `inr`, and `mode` is `normal` or `fraud-demo`. The active payment integration uses Razorpay test-mode orders. The returned URL opens the dashboard's Razorpay Checkout screen; it is not a Stripe URL.
 
 ```json
 {
   "amount": 1,
-  "currency": "usd",
+  "currency": "inr",
   "mode": "normal"
+}
+```
+
+Response (the browser navigates to `url`):
+
+```json
+{
+  "url": "https://dashboard.example.com/checkout?order_id=...&key_id=...&amount=100&currency=INR&session_token=..."
+}
+```
+
+The API creates a Razorpay Order server-side and stores its merchant, amount, currency, and demo mode. `key_id` is the public Razorpay key ID; `session_token` is a short-lived signed checkout token. Keep the Razorpay secret only on the API server. The API accepts only captured payments after verifying both the Razorpay checkout signature and payment status.
+
+For this demo, checkout does not supply the anonymized PCA model inputs, so a replay row from the training dataset supplies those features. The recorded amount and provider IDs come from the captured test payment; the resulting fraud score is a demonstration, not a risk judgment about a real cardholder.
+
+#### `POST /api/payments/verify` - signed checkout session
+
+Razorpay Checkout sends the following fields to the client handler. The backend verifies the signed session, payment signature, order ownership, amount, currency, and captured status before recording and scoring a transaction.
+
+Request:
+
+```json
+{
+  "sessionToken": "<short-lived-checkout-token>",
+  "razorpay_payment_id": "pay_example",
+  "razorpay_order_id": "order_example",
+  "razorpay_signature": "<razorpay-signature>"
 }
 ```
 
@@ -240,9 +330,27 @@ Response:
 
 ```json
 {
-  "url": "https://checkout.example.com/session"
+  "transaction": {
+    "id": "transaction-id",
+    "createdAt": "2026-10-25T12:30:00.000Z",
+    "displayAmount": 1,
+    "currency": "inr",
+    "source": "razorpay",
+    "fraudProbability": 0.12,
+    "riskLabel": "LOW",
+    "isFlagged": false,
+    "scoringStatus": "scored",
+    "modelVersion": "xgboost-v1",
+    "reviewDecision": null,
+    "stripePaymentIntentId": null,
+    "razorpayPaymentId": "pay_example"
+  }
 }
 ```
+
+#### `POST /api/webhooks/razorpay` - Razorpay webhook
+
+Configure the test-mode Razorpay webhook to send `payment.captured` events to this path. The API validates `X-Razorpay-Signature` against the raw request body and is idempotent by Razorpay payment ID. Webhooks are the reliable background path; checkout also verifies captured state immediately for the user-facing result.
 
 ### Model information and alerts
 
@@ -287,14 +395,15 @@ Returns the number of flagged transactions that have not been reviewed.
 - createdAt: ISO date string
 - displayAmount: number (major units, e.g. 49.99)
 - currency: string, e.g. "usd"
-- source: "stripe" or "simulated"
+- source: "razorpay" or "simulated" (old Stripe records may still be returned as "stripe")
 - fraudProbability: number 0 to 1, or null when UNSCORED
 - riskLabel: "LOW" | "MEDIUM" | "HIGH" | "UNSCORED"
 - isFlagged: boolean
 - scoringStatus: "scored" or "pending_review" (ML service was down)
 - modelVersion: string, e.g. "xgb-v1"
 - reviewDecision: null | "confirmed_fraud" | "legit"
-- stripePaymentIntentId: string or null
+- stripePaymentIntentId: string or null (legacy records)
+- razorpayPaymentId: string or null
 
 ## Endpoints
 
@@ -349,11 +458,33 @@ Request: `{decision: "confirmed_fraud" | "legit"}`
 
 Response: `Transaction (updated)`
 
+### POST /predictions/batch [auth: token]
+
+Request: `{transactions: [TransactionFeatures]}` (1–100 entries; each has `Time`, `V1`–`V28`, `Amount`)
+
+Response: `{count, items: [{index, fraudProbability, riskLabel, isFlagged, threshold, modelVersion}]}`. Inputs are not saved and the output does not repeat model features.
+
+### GET /transactions/:id/explanation [auth: token]
+
+Returns merchant-scoped feature impacts for a scored transaction; pending-review transactions return 409. XGBoost uses TreeSHAP and logistic regression uses exact coefficients. Impacts are in log-odds, where positive increases and negative lowers the model score.
+
+Response: `{transactionId, fraudProbability, threshold, modelVersion, method, baselineLogOdds, topFactors: [{feature, value, impact, direction: "increases_risk" | "decreases_risk"}]}` where `method` is `tree_shap` or `linear_coefficients`.
+
 ### POST /payments/checkout-session [auth: token]
 
-Request: `{amount (>= 1), currency ("usd"), mode: "normal" | "fraud-demo"}`
+Request: `{amount (>= 1), currency ("inr"), mode: "normal" | "fraud-demo"}`
 
-Response: `{url}` (browser redirects to Stripe)
+Response: `{url}` (browser opens the app's Razorpay test checkout page)
+
+### POST /payments/verify [auth: signed checkout token]
+
+Request: `{sessionToken, razorpay_payment_id, razorpay_order_id, razorpay_signature}`
+
+Response: `{transaction}` after the backend verifies the captured Razorpay payment.
+
+### POST /webhooks/razorpay [auth: Razorpay HMAC signature]
+
+Accepts Razorpay `payment.captured` events and stores them idempotently.
 
 ### GET /model-info [auth: token]
 

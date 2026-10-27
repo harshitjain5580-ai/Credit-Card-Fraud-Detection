@@ -32,7 +32,9 @@ function formatProbability(value) {
 }
 
 function formatSource(source) {
-  return source === 'stripe' ? 'Stripe' : 'Simulated'
+  if (source === 'razorpay') return 'Razorpay'
+  if (source === 'stripe') return 'Stripe (legacy)'
+  return 'Simulated'
 }
 
 export default function TransactionTable({ items, error, onRetry }) {

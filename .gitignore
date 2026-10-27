@@ -7,6 +7,8 @@ dist
 data/creditcard.csv
 data/processed
 ml-service/data/creditcard.csv
+ml-service/data/creditcard.arff.download
+ml-service/data/creditcard.csv.tmp
 ml-service/data/processed
 
 # Keep trained model artifacts available to the deployed ML service.

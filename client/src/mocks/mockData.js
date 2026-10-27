@@ -34,8 +34,9 @@ export function createMockTransaction({
     scoringStatus: riskLabel === 'UNSCORED' ? 'pending_review' : 'scored',
     modelVersion: 'mock-v1',
     reviewDecision: null,
-    stripePaymentIntentId:
-      source === 'stripe' ? 'pi_mock_' + String(id).replace(/[^a-zA-Z0-9]/g, '') : null,
+    stripePaymentIntentId: null,
+    razorpayPaymentId:
+      source === 'razorpay' ? 'pay_mock_' + String(id).replace(/[^a-zA-Z0-9]/g, '') : null,
   }
 }
 
@@ -55,6 +56,6 @@ export const mockTransactions = Array.from({ length: 80 }, (_, index) => {
     id: 'txn-mock-' + String(index + 1).padStart(4, '0'),
     createdAt,
     riskLabel,
-    source: index % 2 === 0 ? 'stripe' : 'simulated',
+    source: index % 2 === 0 ? 'razorpay' : 'simulated',
   })
 })

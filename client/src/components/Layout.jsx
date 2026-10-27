@@ -31,13 +31,17 @@ export default function Layout() {
             </p>
           </div>
 
-          <nav aria-label="Main navigation" className="flex items-center gap-1">
+          <nav aria-label="Main navigation" className="flex flex-wrap items-center gap-1">
             <NavLink className={navigationClass} end to="/">
               Dashboard
             </NavLink>
             <NavLink className={navigationClass} to="/flagged">
               Flagged transactions
-            </NavLink>            <AlertBell />
+            </NavLink>
+            <NavLink className={navigationClass} to="/analyze">
+              Batch AI analysis
+            </NavLink>
+            <AlertBell />
 
           </nav>
 

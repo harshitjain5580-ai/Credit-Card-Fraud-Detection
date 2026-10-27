@@ -1,0 +1,30 @@
+{
+  "model": "IsolationForest (unsupervised anomaly baseline)",
+  "model_version": "isolation-forest-baseline-v1",
+  "trained_at": "2026-10-26T21:27:08.806122+00:00",
+  "trained_on_genuine_rows": 170589,
+  "threshold": 0.16481541060356097,
+  "threshold_selection": "maximum validation F1 (precision floor unavailable)",
+  "validation_min_precision": 0.8,
+  "precision": 0.20987654320987653,
+  "recall": 0.1717171717171717,
+  "f1": 0.18888888888888888,
+  "roc_auc": 0.9550960424639267,
+  "pr_auc": 0.11263280893549683,
+  "confusion_matrix": [
+    [
+      56799,
+      64
+    ],
+    [
+      82,
+      17
+    ]
+  ],
+  "split_sizes": {
+    "train": 170884,
+    "validation": 56961,
+    "test": 56962
+  },
+  "note": "Anomaly scores are not calibrated fraud probabilities; the production API continues to use the supervised model."
+}

@@ -61,3 +61,19 @@ class ModelInfoResponse(BaseModel):
     min_precision: float = Field(ge=0, le=1)
     trained_at: str
     metrics: ModelMetrics
+
+
+class FeatureImpact(BaseModel):
+    feature: str
+    value: float
+    impact: float
+    direction: Literal["increases_risk", "decreases_risk"]
+
+
+class ExplanationResponse(BaseModel):
+    fraud_probability: float = Field(ge=0, le=1)
+    threshold: float = Field(ge=0, le=1)
+    model_version: str
+    method: Literal["tree_shap", "linear_coefficients"]
+    baseline_log_odds: float
+    top_factors: list[FeatureImpact]

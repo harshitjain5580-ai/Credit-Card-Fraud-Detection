@@ -2,7 +2,7 @@
 
 A full-stack credit-card fraud monitoring demo. Merchants can review transaction activity, inspect model risk scores, and manually review flagged payments from a single dashboard.
 
-> **Demo mode:** The public site currently runs with mock data. Account actions and transactions are simulated in the browser. The demo checkout does not contact Stripe or charge a card, and the displayed mock model metrics should not be used for real fraud decisions.
+> **Demo mode:** The public site currently runs with mock data. Account actions, transactions, and checkout are simulated in the browser. No payment is processed, and mock model metrics are illustrative only.
 
 ## Live demo
 
@@ -26,30 +26,32 @@ The review queue supports risk and date filters and lets a reviewer mark a trans
 
 ## What the project includes
 
-- **React dashboard:** Login and registration screens, a protected overview page, and a flagged-transaction review page.
+- **React dashboard:** Login and registration screens, a protected overview page, a flagged-transaction review page, and a batch AI analysis screen.
 - **Transaction monitoring:** KPI cards, a 24-hour/30-day activity chart, a risk-score histogram, and a transaction table that refreshes every five seconds.
 - **Review workflow:** Filter and page through flagged payments, then record a fraud or legitimate decision. Transactions the model could not score are marked for manual review.
 - **Model information:** Shows the model version, decision threshold, precision, recall, F1, ROC-AUC, PR-AUC, and confusion matrix.
+- **Explainable AI:** Reviewers can inspect the strongest feature contributions behind a scored flag. XGBoost explanations use TreeSHAP; logistic regression uses exact coefficient contributions. Mock mode labels its examples clearly.
+- **Batch AI analysis:** Upload a CSV and score up to 100 rows with the trained model. The analyzer ignores any `Class` label, returns only scores and risk labels, and does not save the uploaded rows.
 - **Alerts:** A navbar bell shows the number of unread flagged transactions and refreshes every 15 seconds.
 - **Mock mode:** An Axios adapter supplies in-memory demo responses while keeping the same API calls as the real backend. The public demo's checkout is only a confirmation message; no payment is processed.
-- **Express API:** JWT authentication, transaction queries and statistics, simulation, review actions, model information, alerts, Stripe test-checkout endpoints, and webhook handling.
-- **Python ML service:** A FastAPI service loads the included trained model artifacts and exposes health, model-info, and prediction endpoints.
+- **Python API:** FastAPI, JWT authentication, MongoDB persistence, transaction queries/statistics, fraud scoring, explanations, simulation, review, alerts, and Razorpay test checkout plus verified webhooks.
+- **Python ML service:** A FastAPI service loads the trained model artifacts and exposes health, model-info, single and batch prediction, and local explanation endpoints. The training pipeline compares four supervised approaches and an Isolation Forest baseline, selects a model and precision-aware threshold using validation data, and evaluates the held-out test set.
 
 ## How it is organized
 
 | Folder | Purpose |
 | --- | --- |
 | `client/` | React 19, Vite, Tailwind CSS, Recharts, and the mock API adapter |
-| `server/` | Express API, MongoDB/Mongoose models, JWT auth, transaction and payment routes |
+| `server/` | Active FastAPI API, MongoDB/PyMongo, JWT auth, fraud routes, and Razorpay payments. `server/legacy-express/` keeps the old Express version as a rollback reference. |
 | `ml-service/` | FastAPI prediction service, model training scripts, tests, and saved model artifacts |
 | `docs/API_CONTRACT.md` | The shared source of truth for API paths and JSON request/response shapes |
 
 ### Request flow
 
 ```text
-React dashboard  ->  Express API  ->  MongoDB
+React dashboard  ->  FastAPI API  ->  MongoDB
                            |        ->  FastAPI model service
-                           |        ->  Stripe test checkout / webhook
+                           |        ->  Razorpay test checkout / webhook
                            |
                     Axios mock adapter
                     (when VITE_USE_MOCK=true)
@@ -84,7 +86,7 @@ Open the local URL printed by Vite (usually `http://localhost:5173`). In mock mo
 
 ## Run the full stack locally
 
-The full stack needs a MongoDB database, the Express server, the Python ML service, and Stripe **test** credentials. Keep all secrets in local `.env` files; never commit them.
+The full stack needs a MongoDB database, the Python API, the Python ML service, and Razorpay **test-mode** credentials to exercise checkout. Keep all secrets in local `.env` files; never commit them.
 
 ### 1. Start the ML service
 
@@ -98,11 +100,11 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-The model file and metadata are under `ml-service/artifacts/`. The original training CSV is not included in the repository.
+The model file and metadata are under `ml-service/artifacts/`. The original training CSV is not included in the repository. See [the ML service guide](ml-service/README.md) to fetch or supply the dataset and reproduce training.
 
 ### 2. Configure and start the API
 
-Create `server/.env` with values for your own services:
+Copy `server/.env.example` to `server/.env` and fill in your own values:
 
 ```env
 PORT=5000
@@ -110,16 +112,23 @@ MONGODB_URI=<your MongoDB connection string>
 JWT_SECRET=<random secret with at least 32 characters>
 CLIENT_URL=http://localhost:5173
 ML_SERVICE_URL=http://localhost:8000
-STRIPE_SECRET_KEY=<your Stripe test secret key>
-STRIPE_WEBHOOK_SECRET=<your Stripe test webhook secret>
+ML_TIMEOUT_MS=60000
+RAZORPAY_KEY_ID=rzp_test_<your test key id>
+RAZORPAY_KEY_SECRET=<your Razorpay test key secret>
+RAZORPAY_WEBHOOK_SECRET=<your Razorpay test webhook secret>
+ALLOW_LIVE_PAYMENTS=false
 ```
 
-`ML_API_KEY` and `SMTP_*` settings are optional. Install and start the server in a separate terminal:
+From inside `server/`, the copy command is `Copy-Item .env.example .env` in PowerShell.
+
+`MONGODB_DATABASE` and `ML_API_KEY` are optional. Keep `ALLOW_LIVE_PAYMENTS=false` for this demo. Start the API in a separate terminal:
 
 ```powershell
 cd server
-npm install
-npm run dev
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+uvicorn app.main:app --reload --port 5000
 ```
 
 ### 3. Point the client at the API
@@ -133,6 +142,7 @@ See [docs/API_CONTRACT.md](docs/API_CONTRACT.md) for the exact endpoints and JSO
 - Authentication: `/api/auth/register`, `/api/auth/login`, `/api/auth/me`
 - Transactions: list, statistics, score histogram, simulation, and review under `/api/transactions`
 - Payments: `/api/payments/checkout-session`
+- Payment confirmation and webhooks: `/api/payments/verify`, `/api/webhooks/razorpay`
 - Model and alerts: `/api/model-info` and `/api/alerts/unread-count`
 
 ## Deployment
@@ -144,4 +154,4 @@ The public demo is a Render **Static Site** built from `client/`:
 - Publish directory: `dist`
 - Environment variable: `VITE_USE_MOCK=true`
 
-Deploying with mock mode keeps the public site independent of backend secrets and does not enable real payments. For a real integration, deploy the API and ML service separately, set their secret environment variables in the host dashboard, then configure the client's `VITE_API_URL` and set `VITE_USE_MOCK=false`.
+Deploying with mock mode keeps the public site independent of backend secrets and does not enable payments. For a real API connection, deploy the Python API from `server/` with start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT`; configure MongoDB, JWT, client, ML, and Razorpay test secrets in the host dashboard. Then set the client's `VITE_API_URL` to the Python API URL and `VITE_USE_MOCK=false`. Configure the Razorpay **test-mode** webhook at `<API URL>/api/webhooks/razorpay` for `payment.captured`. Keep `ALLOW_LIVE_PAYMENTS=false` unless the project is approved for live payments and you intentionally switch credentials.

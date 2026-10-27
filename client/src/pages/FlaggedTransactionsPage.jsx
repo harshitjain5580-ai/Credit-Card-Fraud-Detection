@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import apiClient, { getApiErrorMessage } from '../api/client'
 import FlaggedFilterBar from '../components/FlaggedFilterBar'
 import FlaggedTransactionsTable from '../components/FlaggedTransactionsTable'
+import TransactionExplanationCard from '../components/TransactionExplanationCard'
 
 const PAGE_SIZE = 20
 const emptyFilters = { riskLabel: '', from: '', to: '' }
@@ -30,6 +31,9 @@ export default function FlaggedTransactionsPage() {
   const [error, setError] = useState('')
   const [actionError, setActionError] = useState('')
   const [reviewingId, setReviewingId] = useState('')
+  const [explainingId, setExplainingId] = useState('')
+  const [explanation, setExplanation] = useState(null)
+  const [explanationError, setExplanationError] = useState('')
 
   const loadTransactions = useCallback(async () => {
     setLoading(true)
@@ -118,6 +122,30 @@ export default function FlaggedTransactionsPage() {
     }
   }
 
+  async function explainTransaction(id) {
+    if (explanation?.transactionId === id) {
+      setExplanation(null)
+      setExplanationError('')
+      return
+    }
+
+    setExplainingId(id)
+    setExplanation(null)
+    setExplanationError('')
+    try {
+      const { data } = await apiClient.get(
+        '/api/transactions/' + encodeURIComponent(id) + '/explanation',
+      )
+      setExplanation(data)
+    } catch (requestError) {
+      setExplanationError(
+        getApiErrorMessage(requestError, 'Could not load the model explanation.'),
+      )
+    } finally {
+      setExplainingId('')
+    }
+  }
+
   const pageCount = Math.max(1, Math.ceil(total / limit))
   const firstResult = total === 0 ? 0 : (page - 1) * limit + 1
   const lastResult = Math.min(page * limit, total)
@@ -183,8 +211,21 @@ export default function FlaggedTransactionsPage() {
           <FlaggedTransactionsTable
             items={items}
             onReview={reviewTransaction}
+            onExplain={explainTransaction}
             reviewingId={reviewingId}
+            explainingId={explainingId}
           />
+
+          {explanationError && (
+            <p
+              aria-live="polite"
+              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+              role="alert"
+            >
+              {explanationError}
+            </p>
+          )}
+          {explanation && <TransactionExplanationCard explanation={explanation} />}
 
           <nav aria-label="Flagged transaction pages" className="flex items-center justify-between">
             <button

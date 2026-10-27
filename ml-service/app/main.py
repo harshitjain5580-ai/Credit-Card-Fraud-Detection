@@ -5,13 +5,20 @@ from contextlib import asynccontextmanager
 from time import perf_counter
 from typing import Annotated
 
+import numpy as np
 import pandas as pd
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import Field
 
 from app.model_loader import load_model_artifacts
-from app.schemas import ModelInfoResponse, PredictionResponse, TransactionFeatures
+from app.schemas import (
+    ExplanationResponse,
+    FeatureImpact,
+    ModelInfoResponse,
+    PredictionResponse,
+    TransactionFeatures,
+)
 
 
 logger = logging.getLogger("fraud_detection_api")
@@ -99,6 +106,75 @@ def make_prediction(
     )
 
 
+def make_explanation(
+    features: TransactionFeatures,
+    request: Request,
+) -> ExplanationResponse:
+    """Return TreeSHAP impacts for XGBoost or exact coefficient impacts for logistic regression."""
+    model = request.app.state.model
+    steps = getattr(model, "named_steps", {})
+    classifier = steps.get("classifier")
+    preprocessor = steps.get("preprocessing")
+    if classifier is None or preprocessor is None:
+        raise HTTPException(
+            status_code=501,
+            detail="This model does not support local feature explanations.",
+        )
+
+    row = pd.DataFrame(
+        [[getattr(features, column) for column in FEATURE_COLUMNS]],
+        columns=FEATURE_COLUMNS,
+    )
+    transformed = preprocessor.transform(row)
+    feature_names = list(preprocessor.get_feature_names_out())
+    if hasattr(classifier, "get_booster"):
+        from xgboost import DMatrix
+
+        contributions = classifier.get_booster().predict(
+            DMatrix(transformed), pred_contribs=True
+        )[0]
+        baseline_log_odds = float(contributions[-1])
+        feature_impacts = contributions[:-1]
+        explanation_method = "tree_shap"
+    elif hasattr(classifier, "coef_") and hasattr(classifier, "intercept_"):
+        # For logistic regression, coefficient * transformed input is the exact
+        # feature contribution to the fraud-class log-odds.
+        feature_impacts = np.asarray(transformed)[0] * classifier.coef_[0]
+        baseline_log_odds = float(classifier.intercept_[0])
+        explanation_method = "linear_coefficients"
+    else:
+        raise HTTPException(
+            status_code=501,
+            detail="This model does not support local feature explanations.",
+        )
+
+    if len(feature_impacts) != len(feature_names):
+        raise HTTPException(
+            status_code=503,
+            detail="The model could not produce a complete explanation.",
+        )
+
+    impacts = [
+        FeatureImpact(
+            feature=name,
+            value=float(getattr(features, name)),
+            impact=float(impact),
+            direction="increases_risk" if impact >= 0 else "decreases_risk",
+        )
+        for name, impact in zip(feature_names, feature_impacts, strict=True)
+    ]
+    top_factors = sorted(impacts, key=lambda item: abs(item.impact), reverse=True)[:5]
+    prediction = make_prediction(features, request)
+    return ExplanationResponse(
+        fraud_probability=prediction.fraud_probability,
+        threshold=prediction.threshold,
+        model_version=prediction.model_version,
+        method=explanation_method,
+        baseline_log_odds=baseline_log_odds,
+        top_factors=top_factors,
+    )
+
+
 @app.get("/health")
 async def health(request: Request) -> dict[str, str | bool]:
     return {
@@ -145,6 +221,18 @@ async def predict(
     request: Request,
 ) -> PredictionResponse:
     return make_prediction(features, request)
+
+
+@app.post(
+    "/explain",
+    response_model=ExplanationResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def explain(
+    features: TransactionFeatures,
+    request: Request,
+) -> ExplanationResponse:
+    return make_explanation(features, request)
 
 
 @app.post(

@@ -27,7 +27,7 @@ from training.train_compare import (
 )
 
 
-MODEL_NAME = "C"  # XGBoost had the highest validation PR-AUC in model_comparison.csv.
+MODEL_NAME = "C"  # Standalone default; run_pipeline selects by validation PR-AUC.
 MIN_PRECISION = 0.80
 MODEL_VERSION = {
     "A": "logistic-regression-v1",
@@ -207,6 +207,15 @@ def finalize_model(
             "train": int(len(y_train)),
             "validation": int(len(y_validation)),
             "test": int(len(y_test)),
+        },
+        "dataset": {
+            "name": "ULB/Kaggle Credit Card Fraud Detection",
+            "rows": int(len(y_train) + len(y_validation) + len(y_test)),
+            "fraud_rows": int(y_train.sum() + y_validation.sum() + y_test.sum()),
+            "fraud_rate": float(
+                (y_train.sum() + y_validation.sum() + y_test.sum())
+                / (len(y_train) + len(y_validation) + len(y_test))
+            ),
         },
         "date": date.today().isoformat(),
         "trained_at": datetime.now(timezone.utc).isoformat(),

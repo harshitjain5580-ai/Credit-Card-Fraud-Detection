@@ -6,18 +6,19 @@ This checklist covers actions that require a person to use hosting accounts, sup
 
 - [ ] Choose hosting providers for the ML service and backend, and create the required accounts.
 - [ ] Create a MongoDB Atlas database and allow the backend host to connect to it.
+- [ ] Rotate the MongoDB database-user password shown in the earlier setup screenshot, then update the connection string in the API host secrets.
 - [ ] Prepare the production environment values listed below. Store them in each hosting provider's secret/environment-variable settings, not in committed files.
 - [ ] Coordinate with the frontend developer so they can configure the backend URL in the deployed client.
 
 ## Deploy in this order
 
-1. [ ] Deploy `/ml-service`; wait for it to become healthy and record its public base URL.
-2. [ ] Deploy `/server` and configure its environment variables. Set `ML_SERVICE_URL` to the ML service URL from step 1.
+1. [ ] Deploy `/ml-service` as a Python web service; wait for `/health` to report `model_loaded` and record its public base URL.
+2. [ ] Deploy `/server` as a Python web service. Set root directory to `server`, build command to `pip install -r requirements.txt`, and start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Set `ML_SERVICE_URL` to the ML service URL from step 1.
 3. [ ] Send the deployed backend URL to the frontend developer.
 4. [ ] Deploy `/client` with `VITE_API_URL` set to the backend URL and `VITE_USE_MOCK=false`.
 5. [ ] Set the backend's `CLIENT_URL` to the deployed client URL, then redeploy/restart the backend.
-6. [ ] In Stripe's test-mode dashboard, create a webhook endpoint pointing to `<backend URL>/api/webhooks/stripe` and subscribe to `payment_intent.succeeded`.
-7. [ ] Copy that endpoint's signing secret (`whsec_...`) into the backend's `STRIPE_WEBHOOK_SECRET`, then redeploy/restart the backend.
+6. [ ] In Razorpay's test-mode dashboard, create a webhook endpoint pointing to `<backend URL>/api/webhooks/razorpay` and subscribe to `payment.captured`.
+7. [ ] Copy the webhook secret you set into `RAZORPAY_WEBHOOK_SECRET`, then redeploy/restart the backend.
 
 ## Backend environment variables
 
@@ -30,23 +31,21 @@ Set these in the backend host's environment settings:
 - `ML_SERVICE_URL` — deployed ML service base URL.
 - `ML_API_KEY` — key shared with the ML service configuration.
 - `ML_TIMEOUT_MS` — request timeout in milliseconds; keep it configurable because free hosts may take 30+ seconds to wake after idle.
-- `STRIPE_SECRET_KEY` — Stripe test-mode secret key.
-- `STRIPE_WEBHOOK_SECRET` — signing secret for the deployed Stripe webhook endpoint.
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` — SMTP settings for email alerts. If SMTP is not configured, alerts are logged instead of emailed.
+- `RAZORPAY_KEY_ID` — Razorpay test-mode key ID (starts with `rzp_test_`).
+- `RAZORPAY_KEY_SECRET` — matching test-mode secret.
+- `RAZORPAY_WEBHOOK_SECRET` — secret set for the Razorpay webhook.
+- `ALLOW_LIVE_PAYMENTS=false` — keep real payments disabled for this demo.
+- `MONGODB_DATABASE` — optional database name when it is not included in `MONGODB_URI`.
 
-Use the deployment provider's Python 3.11 runtime for `/ml-service`. Do not upload or commit `data/creditcard.csv` or `data/processed`.
+Use Python 3.12 for both `/ml-service` and `/server`. Do not upload or commit `data/creditcard.csv` or `data/processed`.
 
-## Stripe CLI for local testing
+## Razorpay test checkout
 
-- [ ] Install and authenticate the Stripe CLI.
-- [ ] Start forwarding local test events:
-
-  ```text
-  stripe listen --forward-to localhost:5000/api/webhooks/stripe
-  ```
-
-- [ ] Put the `whsec_...` value printed by this command into the local server's `STRIPE_WEBHOOK_SECRET`. The CLI secret is for local forwarding; use the separate endpoint signing secret for the deployed webhook.
-- [ ] Trigger or complete a Stripe test-mode payment and confirm the backend receives it.
+- [ ] In Razorpay Dashboard, switch to Test Mode and create test API keys.
+- [ ] Store the test key ID and secret in the API's environment variables only.
+- [ ] In Razorpay Test Mode → Webhooks, add `<backend URL>/api/webhooks/razorpay` and subscribe to `payment.captured`.
+- [ ] Put the webhook secret configured in Razorpay into `RAZORPAY_WEBHOOK_SECRET` on the API.
+- [ ] Complete a Razorpay test-mode payment. Test mode simulates payments and does not move real money.
 
 ## End-to-end verification
 
@@ -54,7 +53,7 @@ Use the deployment provider's Python 3.11 runtime for `/ml-service`. Do not uplo
 - [ ] Confirm the dashboard loads data from the real backend (not mock data).
 - [ ] Simulate transactions and confirm they appear in the dashboard.
 - [ ] Confirm flagged transactions appear in the review view and can be marked as fraud or legitimate.
-- [ ] Complete a Stripe test-mode checkout and confirm one transaction is recorded for the payment.
+- [ ] Complete a Razorpay test-mode checkout and confirm one transaction is recorded for the payment.
 - [ ] Confirm the unread alert count updates for unreviewed flagged transactions.
 - [ ] Check backend and ML health endpoints after deployment.
 - [ ] Verify that no real secrets, `.env` files, or prohibited dataset files were committed.

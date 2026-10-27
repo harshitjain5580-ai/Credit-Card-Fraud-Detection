@@ -23,6 +23,12 @@
     "validation": 56961,
     "test": 56962
   },
-  "date": "2026-10-25",
-  "trained_at": "2026-10-25"
+  "dataset": {
+    "name": "ULB/Kaggle Credit Card Fraud Detection",
+    "rows": 284807,
+    "fraud_rows": 492,
+    "fraud_rate": 0.001727485630620034
+  },
+  "date": "2026-10-27",
+  "trained_at": "2026-10-26T21:27:05.698672+00:00"
 }

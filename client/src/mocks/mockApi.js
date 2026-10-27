@@ -6,6 +6,11 @@ const HOUR_MS = 60 * 60 * 1000
 const users = new Map()
 const transactions = [...mockTransactions]
 let transactionSequence = mockTransactions.length
+const predictionFeatureNames = [
+  'Time',
+  ...Array.from({ length: 28 }, (_, index) => 'V' + (index + 1)),
+  'Amount',
+]
 
 const statusText = {
   200: 'OK',
@@ -310,6 +315,79 @@ function updateReview(config, id, body) {
   return makeResponse(config, 200, { ...transaction })
 }
 
+function explainMockTransaction(config, id) {
+  const transaction = transactions.find((item) => item.id === decodeURIComponent(id))
+  if (!transaction) rejectRequest(config, 404, 'Transaction was not found.', 'NOT_FOUND')
+  if (transaction.scoringStatus !== 'scored') {
+    rejectRequest(config, 409, 'This transaction has no model score to explain.', 'NOT_SCORED')
+  }
+
+  const mockImpact = transaction.riskLabel === 'HIGH' ? 2.1 : -0.8
+  return makeResponse(config, 200, {
+    transactionId: transaction.id,
+    fraudProbability: transaction.fraudProbability,
+    threshold: 0.5,
+    modelVersion: 'mock-v1-placeholder',
+    method: 'tree_shap',
+    baselineLogOdds: -2.4,
+    topFactors: [
+      {
+        feature: 'V14',
+        value: Number(((transaction.displayAmount % 4) - 2).toFixed(3)),
+        impact: mockImpact,
+        direction: mockImpact >= 0 ? 'increases_risk' : 'decreases_risk',
+      },
+      {
+        feature: 'Amount',
+        value: transaction.displayAmount,
+        impact: 0.32,
+        direction: 'increases_risk',
+      },
+    ],
+  })
+}
+
+function scoreMockBatch(config, body) {
+  if (
+    !Array.isArray(body.transactions) ||
+    body.transactions.length < 1 ||
+    body.transactions.length > 100
+  ) {
+    rejectRequest(config, 422, 'Provide between 1 and 100 transactions.', 'INVALID_INPUT')
+  }
+
+  const items = body.transactions.map((transaction, index) => {
+    if (
+      !transaction ||
+      Object.keys(transaction).length !== predictionFeatureNames.length ||
+      predictionFeatureNames.some((name) => !Number.isFinite(transaction[name])) ||
+      transaction.Amount < 0
+    ) {
+      rejectRequest(config, 422, 'Each row must contain valid model features.', 'INVALID_INPUT')
+    }
+
+    const signal =
+      Math.abs(transaction.V14) * 0.55 +
+      Math.abs(transaction.V10) * 0.3 +
+      Math.abs(transaction.V12) * 0.25 +
+      Math.log1p(transaction.Amount) * 0.08 -
+      2.4
+    const fraudProbability = Number((1 / (1 + Math.exp(-signal))).toFixed(6))
+    const threshold = 0.5
+    const riskLabel = fraudProbability >= threshold ? 'HIGH' : fraudProbability >= 0.25 ? 'MEDIUM' : 'LOW'
+    return {
+      index,
+      fraudProbability,
+      riskLabel,
+      isFlagged: fraudProbability >= threshold,
+      threshold,
+      modelVersion: 'mock-v1-placeholder',
+    }
+  })
+
+  return makeResponse(config, 200, { count: items.length, items })
+}
+
 function checkoutSession(config, body) {
   const amount = Number(body.amount)
   const currency = String(body.currency || '').toLowerCase()
@@ -396,9 +474,20 @@ export default async function mockApiAdapter(config) {
       return makeResponse(config, 200, { user })
     }
 
+    if (method === 'post' && pathname === '/api/predictions/batch') {
+      requireUser(config)
+      return scoreMockBatch(config, body)
+    }
+
     if (method === 'get' && pathname === '/api/transactions') {
       requireUser(config)
       return listTransactions(config, params)
+    }
+
+    const explanationMatch = pathname.match(/^\/api\/transactions\/([^/]+)\/explanation$/)
+    if (method === 'get' && explanationMatch) {
+      requireUser(config)
+      return explainMockTransaction(config, explanationMatch[1])
     }
 
     if (method === 'get' && pathname === '/api/transactions/stats') {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import apiClient, { getApiErrorMessage } from '../api/client'
 import DashboardError from '../components/DashboardError'
 import DashboardSkeleton from '../components/DashboardSkeleton'
@@ -13,6 +14,7 @@ const numberFormatter = new Intl.NumberFormat()
 const isMockMode = import.meta.env.VITE_USE_MOCK === 'true'
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [stats, setStats] = useState(null)
   const [histogram, setHistogram] = useState([])
@@ -99,7 +101,7 @@ export default function DashboardPage() {
     try {
       const { data } = await apiClient.post('/api/payments/checkout-session', {
         amount: 1,
-        currency: 'usd',
+        currency: 'inr',
         mode: 'normal',
       })
 
@@ -113,7 +115,11 @@ export default function DashboardPage() {
         throw new Error('The checkout service did not return a redirect URL.')
       }
 
-      window.location.assign(data.url)
+      const checkoutUrl = new URL(data.url, window.location.origin)
+      if (checkoutUrl.origin !== window.location.origin) {
+        throw new Error('The checkout service returned a URL for a different site.')
+      }
+      navigate(checkoutUrl.pathname + checkoutUrl.search)
     } catch (requestError) {
       setActionError(
         getApiErrorMessage(requestError, 'Could not start the test checkout. Please try again.'),
@@ -172,7 +178,7 @@ export default function DashboardPage() {
                 : 'Starting checkout...'
               : isMockMode
                 ? 'Try demo checkout'
-                : 'Pay with Stripe (test)'}
+                : 'Pay with Razorpay (test)'}
           </button>
         </div>
       </section>
@@ -247,7 +253,7 @@ export default function DashboardPage() {
           </p>
         ) : (
           <p className="px-1 text-xs text-slate-500">
-            Stripe test card: <span className="font-semibold text-slate-700">4242 4242 4242 4242</span>
+            Razorpay test mode simulates payment. No real money is moved.
           </p>
         )}
       </section>

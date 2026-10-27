@@ -35,7 +35,13 @@ function reviewLabel(decision) {
   return decision === 'confirmed_fraud' ? 'Confirmed fraud' : 'Marked legit'
 }
 
-export default function FlaggedTransactionsTable({ items, reviewingId, onReview }) {
+export default function FlaggedTransactionsTable({
+  items,
+  reviewingId,
+  explainingId,
+  onReview,
+  onExplain,
+}) {
   if (items.length === 0) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm">
@@ -48,7 +54,7 @@ export default function FlaggedTransactionsTable({ items, reviewingId, onReview 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-[1050px] w-full border-collapse text-left text-sm">
+        <table className="min-w-[1180px] w-full border-collapse text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-5 py-3 font-semibold">Time</th>
@@ -57,6 +63,7 @@ export default function FlaggedTransactionsTable({ items, reviewingId, onReview 
               <th className="px-5 py-3 font-semibold">Risk</th>
               <th className="px-5 py-3 font-semibold">Source</th>
               <th className="px-5 py-3 font-semibold">Scoring status</th>
+              <th className="px-5 py-3 font-semibold">Model insight</th>
               <th className="px-5 py-3 font-semibold">Review</th>
             </tr>
           </thead>
@@ -85,7 +92,11 @@ export default function FlaggedTransactionsTable({ items, reviewingId, onReview 
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-5 py-4 text-slate-600">
-                    {transaction.source === 'stripe' ? 'Stripe' : 'Simulated'}
+                    {transaction.source === 'razorpay'
+                      ? 'Razorpay'
+                      : transaction.source === 'stripe'
+                        ? 'Stripe (legacy)'
+                        : 'Simulated'}
                   </td>
                   <td className="px-5 py-4">
                     <span className="text-sm text-slate-700">
@@ -96,6 +107,16 @@ export default function FlaggedTransactionsTable({ items, reviewingId, onReview 
                         Model unavailable - needs manual review
                       </span>
                     )}
+                  </td>
+                  <td className="px-5 py-4">
+                    <button
+                      className="whitespace-nowrap rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-800 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={transaction.scoringStatus !== 'scored' || Boolean(explainingId)}
+                      onClick={() => onExplain(transaction.id)}
+                      type="button"
+                    >
+                      {explainingId === transaction.id ? 'Explaining...' : 'Why this score?'}
+                    </button>
                   </td>
                   <td className="px-5 py-4">
                     {transaction.reviewDecision ? (

@@ -5,7 +5,12 @@ import { z } from "zod";
 import { requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import Transaction from "../models/Transaction.js";
-import { fetchModelInfo, scoreTransaction } from "../services/mlClient.js";
+import {
+  explainTransaction,
+  fetchModelInfo,
+  scoreTransaction,
+  scoreTransactions,
+} from "../services/mlClient.js";
 import { pickSample } from "../services/replaySamples.js";
 import { scoreAndSave } from "../services/scoringService.js";
 
@@ -27,6 +32,18 @@ const reviewSchema = z.object({
 }).strict();
 const transactionParamsSchema = z.object({
   id: z.string().refine(mongoose.isValidObjectId, "Transaction id is invalid."),
+}).strict();
+const featureNames = ["Time", ...Array.from({ length: 28 }, (_value, index) => `V${index + 1}`), "Amount"];
+const batchFeaturesSchema = z.object(
+  Object.fromEntries(
+    featureNames.map((name) => [
+      name,
+      name === "Amount" ? z.number().finite().nonnegative() : z.number().finite(),
+    ]),
+  ),
+).strict();
+const batchPredictionSchema = z.object({
+  transactions: z.array(batchFeaturesSchema).min(1).max(100),
 }).strict();
 
 /** Serializes a database transaction without exposing its model features. */
@@ -107,9 +124,11 @@ export function createTransactionsRouter({
   config = {},
   TransactionModel = Transaction,
   score = scoreTransaction,
+  batchScorer,
   saveScoredTransaction,
   replaySamplePicker = pickSample,
   modelInfoFetcher,
+  explanationFetcher,
   notifyAlert,
 } = {}) {
   if (!jwtSecret) {
@@ -118,6 +137,29 @@ export function createTransactionsRouter({
 
   const router = Router();
   router.use(requireAuth(jwtSecret));
+
+  /** Runs an authenticated, non-persisting batch through the current fraud model. */
+  router.post(
+    "/predictions/batch",
+    validate(batchPredictionSchema),
+    async (request, response, next) => {
+      try {
+        const scoreBatch = batchScorer ?? ((transactions) =>
+          scoreTransactions(transactions, {
+            baseUrl: config.ML_SERVICE_URL,
+            apiKey: config.ML_API_KEY,
+            timeoutMs: config.ML_TIMEOUT_MS,
+          }));
+        const predictions = await scoreBatch(request.validated.body.transactions);
+        return response.json({
+          count: predictions.length,
+          items: predictions.map((prediction, index) => ({ index, ...prediction })),
+        });
+      } catch (error) {
+        return next(error);
+      }
+    },
+  );
 
   /** Lists filtered transactions belonging only to the authenticated merchant. */
   router.get(
@@ -306,6 +348,49 @@ export function createTransactionsRouter({
           throw requestError(404, "Transaction was not found.", "NOT_FOUND");
         }
         return response.json(serializeTransaction(transaction));
+      } catch (error) {
+        return next(error);
+      }
+    },
+  );
+
+  /** Returns per-transaction model impacts without exposing stored features. */
+  router.get(
+    "/transactions/:id/explanation",
+    validate(transactionParamsSchema, "params"),
+    async (request, response, next) => {
+      try {
+        const transaction = await TransactionModel.findOne({
+          _id: request.validated.params.id,
+          merchantId: request.auth.userId,
+        }).lean();
+        if (!transaction) {
+          throw requestError(404, "Transaction was not found.", "NOT_FOUND");
+        }
+        if (transaction.scoringStatus !== "scored" || !transaction.features) {
+          throw requestError(
+            409,
+            "This transaction has no model score to explain.",
+            "NOT_SCORED",
+          );
+        }
+
+        const fetchExplanation = explanationFetcher ?? ((features) =>
+          explainTransaction(features, {
+            baseUrl: config.ML_SERVICE_URL,
+            apiKey: config.ML_API_KEY,
+            timeoutMs: config.ML_TIMEOUT_MS,
+          }));
+        const explanation = await fetchExplanation(transaction.features);
+        return response.json({
+          transactionId: String(transaction._id ?? transaction.id),
+          fraudProbability: explanation.fraudProbability,
+          threshold: explanation.threshold,
+          modelVersion: explanation.modelVersion,
+          method: explanation.method,
+          baselineLogOdds: explanation.baselineLogOdds,
+          topFactors: explanation.topFactors,
+        });
       } catch (error) {
         return next(error);
       }
