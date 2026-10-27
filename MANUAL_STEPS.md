@@ -2,6 +2,12 @@
 
 This checklist covers actions that require a person to use hosting accounts, supply secrets, or coordinate with the team. Never put real secrets in source control or share them in chat.
 
+## Current deployment status (checked 2026-10-27)
+
+- Render has one active service: the static demo at `credit-card-fraud-detection-demo.onrender.com`, currently sourced from `Chiraag-Aggarwal/Credit-Card-Fraud-Detection` on `main` (live commit `5e39464`).
+- The updated code is in `harshitjain5580-ai/Credit-Card-Fraud-Detection`. The Render source picker currently lists only the Chiraag repository, so connect the updated repository before enabling automatic deployment from it.
+- The active Render workspace has no deployed API or ML service yet. The static demo therefore remains in mock mode; real login, storage, scoring, and payment are not live.
+
 ## Before deployment
 
 - [ ] Choose hosting providers for the ML service and backend, and create the required accounts.
@@ -60,5 +66,7 @@ Use Python 3.12 for both `/ml-service` and `/server`. Do not upload or commit `d
 
 ## Team handoff
 
-- [ ] Module B owner: finish the remaining client and documentation work, including the narrow-screen layout issue and the observed rate-limit (`429`) UX, then provide any requested screenshots/demo materials.
+- [x] Improve the mobile navbar layout and show a wait message for API rate limits. The backend now exposes its `Retry-After` header to the client.
+- [ ] Verify the navbar on a small-screen browser and confirm the rate-limit wait time against the deployed API.
+- [ ] Provide refreshed screenshots/demo materials if the team still needs them.
 - [ ] Team: complete the knowledge swap and confirm who owns each remaining deployment and demo task.

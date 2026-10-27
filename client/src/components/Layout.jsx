@@ -21,8 +21,8 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-4 sm:px-8">
-          <div>
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4 sm:px-8">
+          <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
               Payment risk console
             </p>
@@ -31,7 +31,7 @@ export default function Layout() {
             </p>
           </div>
 
-          <nav aria-label="Main navigation" className="flex flex-wrap items-center gap-1">
+          <nav aria-label="Main navigation" className="flex w-full flex-wrap items-center gap-1 sm:w-auto">
             <NavLink className={navigationClass} end to="/">
               Dashboard
             </NavLink>
@@ -45,7 +45,7 @@ export default function Layout() {
 
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
             {isMockMode && (
               <span
                 className="rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900"
